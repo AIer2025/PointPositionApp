@@ -62,10 +62,19 @@ namespace PointPositionApp.Views
                 VM.JogReverse(axis, false);
         }
 
-        private void AbsoluteMove_Click(object sender, RoutedEventArgs e)
+        private async void AbsoluteMove_Click(object sender, RoutedEventArgs e)
         {
             if ((sender as FrameworkElement)?.Tag is AxisViewModel axis)
-                VM.AbsoluteMove(axis);
+            {
+                try
+                {
+                    await VM.AbsoluteMoveAsync(axis);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine($"绝对运动异常: {ex.Message}");
+                }
+            }
         }
 
         private void Home_Click(object sender, RoutedEventArgs e)

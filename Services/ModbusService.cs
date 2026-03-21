@@ -22,28 +22,61 @@ namespace PointPositionApp.Services
         private IModbusMaster? _master;
         private readonly object _lock = new();
         private bool _isConnected;
-        private readonly byte _slaveId = 1;
+        private readonly byte _slaveId;
+        private readonly int _connectTimeoutMs;
+        private readonly int _readWriteTimeoutMs;
+        private readonly int _maxCommErrors;
+        private readonly int _modbusRetries;
 
         public bool IsConnected => _isConnected;
 
         public string IpAddress { get; set; } = "192.168.1.100";
         public int Port { get; set; } = 502;
 
+        public ModbusService(AppSettings? settings = null)
+        {
+            _slaveId = settings?.SlaveId ?? 1;
+            _connectTimeoutMs = settings?.ConnectTimeoutMs ?? 3000;
+            _readWriteTimeoutMs = settings?.ReadWriteTimeoutMs ?? 2000;
+            _maxCommErrors = settings?.MaxCommErrors ?? 3;
+            _modbusRetries = settings?.ModbusRetries ?? 2;
+        }
+
         public event Action<bool>? ConnectionStateChanged;
+
+        /// <summary>
+        /// 带指数退避的自动重连（最多重试3次，间隔 1s, 2s, 4s）
+        /// </summary>
+        public async Task<bool> ConnectWithRetryAsync(int maxRetries = 3)
+        {
+            for (int attempt = 0; attempt <= maxRetries; attempt++)
+            {
+                if (attempt > 0)
+                {
+                    var delay = (int)Math.Pow(2, attempt - 1) * 1000;
+                    Logger.Info("第 {0} 次重连，等待 {1}ms...", attempt, delay);
+                    await Task.Delay(delay);
+                }
+
+                if (await ConnectAsync())
+                    return true;
+            }
+            return false;
+        }
 
         public async Task<bool> ConnectAsync()
         {
             try
             {
                 _tcpClient = new TcpClient();
-                _tcpClient.ReceiveTimeout = 3000;
-                _tcpClient.SendTimeout = 3000;
+                _tcpClient.ReceiveTimeout = _connectTimeoutMs;
+                _tcpClient.SendTimeout = _connectTimeoutMs;
                 await _tcpClient.ConnectAsync(IpAddress, Port);
                 var factory = new ModbusFactory();
                 _master = factory.CreateMaster(_tcpClient);
-                _master.Transport.ReadTimeout = 2000;
-                _master.Transport.WriteTimeout = 2000;
-                _master.Transport.Retries = 2;
+                _master.Transport.ReadTimeout = _readWriteTimeoutMs;
+                _master.Transport.WriteTimeout = _readWriteTimeoutMs;
+                _master.Transport.Retries = _modbusRetries;
                 _isConnected = true;
                 ConnectionStateChanged?.Invoke(true);
                 Logger.Info("Modbus TCP 连接成功: {0}:{1}", IpAddress, Port);
@@ -83,6 +116,7 @@ namespace PointPositionApp.Services
                 try
                 {
                     _master.WriteSingleCoil(_slaveId, address, value);
+                    ResetCommErrorCount();
                     return true;
                 }
                 catch (Exception ex)
@@ -105,6 +139,7 @@ namespace PointPositionApp.Services
                 {
                     var result = _master.ReadCoils(_slaveId, address, 1);
                     value = result[0];
+                    ResetCommErrorCount();
                     return true;
                 }
                 catch (Exception ex)
@@ -133,6 +168,7 @@ namespace PointPositionApp.Services
                     ushort high = BitConverter.ToUInt16(bytes, 2);
                     // 汇川PLC: 低字在前
                     _master.WriteMultipleRegisters(_slaveId, address, new ushort[] { low, high });
+                    ResetCommErrorCount();
                     return true;
                 }
                 catch (Exception ex)
@@ -179,6 +215,7 @@ namespace PointPositionApp.Services
                 try
                 {
                     _master.WriteSingleRegister(_slaveId, address, (ushort)value);
+                    ResetCommErrorCount();
                     return true;
                 }
                 catch (Exception ex)
@@ -201,6 +238,7 @@ namespace PointPositionApp.Services
                 {
                     var regs = _master.ReadHoldingRegisters(_slaveId, address, 1);
                     value = (short)regs[0];
+                    ResetCommErrorCount();
                     return true;
                 }
                 catch (Exception ex)
@@ -221,6 +259,7 @@ namespace PointPositionApp.Services
                 try
                 {
                     _master.WriteSingleRegister(_slaveId, address, value);
+                    ResetCommErrorCount();
                     return true;
                 }
                 catch (Exception ex)
@@ -288,11 +327,11 @@ namespace PointPositionApp.Services
             Logger.Info("{0} 绝对运动 -> {1:F3} mm", axis.AxisName, target);
         }
 
-        /// <summary>绝对运动（同步，仅供后台线程调用）</summary>
-        public void AbsoluteMove(AxisConfig axis, float target)
+        /// <summary>绝对运动（同步版本，内部使用异步等待避免阻塞）</summary>
+        public async Task AbsoluteMoveSyncAsync(AxisConfig axis, float target)
         {
             WriteFloat(axis.TargetPosRegister, target);
-            Thread.Sleep(50);
+            await Task.Delay(50);
             if (axis.AbsMoveIsCoil)
                 WriteCoil(axis.AbsMoveRegister, true);
             else
@@ -357,19 +396,19 @@ namespace PointPositionApp.Services
         #endregion
 
         private int _commErrorCount;
-        private const int MaxCommErrors = 3;
 
         private void HandleCommError()
         {
             _commErrorCount++;
+            var currentCount = _commErrorCount;
 
             // TCP断开或连续通信错误超过阈值，标记为断开
-            if ((_tcpClient != null && !_tcpClient.Connected) || _commErrorCount >= MaxCommErrors)
+            if ((_tcpClient != null && !_tcpClient.Connected) || _commErrorCount >= _maxCommErrors)
             {
                 _isConnected = false;
                 _commErrorCount = 0;
                 ConnectionStateChanged?.Invoke(false);
-                Logger.Warn("PLC 连接已断开（连续错误 {0} 次）", _commErrorCount);
+                Logger.Warn("PLC 连接已断开（连续错误 {0} 次）", currentCount);
             }
         }
 

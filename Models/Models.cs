@@ -170,6 +170,14 @@ namespace PointPositionApp.Models
         public int PlcPort { get; set; } = 502;
         public int PollingIntervalMs { get; set; } = 300;
         public string LogLevel { get; set; } = "Info";
+
+        // Modbus 通信参数
+        public byte SlaveId { get; set; } = 1;
+        public int ConnectTimeoutMs { get; set; } = 3000;
+        public int ReadWriteTimeoutMs { get; set; } = 2000;
+        public int MaxCommErrors { get; set; } = 3;
+        public int ModbusRetries { get; set; } = 2;
+
         public List<AxisConfig> Axes { get; set; } = new();
         public List<ClawModbusConfig> Claws { get; set; } = new();
     }

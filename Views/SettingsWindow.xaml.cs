@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using System.Linq;
+using System.Net;
 using System.Text;
 using System.Windows;
 using PointPositionApp.Models;
@@ -55,14 +57,37 @@ namespace PointPositionApp.Views
 
         private void BtnSave_Click(object sender, RoutedEventArgs e)
         {
-            _settings.DatabasePath = tbDbPath.Text.Trim();
-            _settings.PlcIpAddress = tbPlcIp.Text.Trim();
+            var errors = new List<string>();
 
-            if (int.TryParse(tbPlcPort.Text, out int port))
-                _settings.PlcPort = port;
+            // 验证数据库路径
+            var dbPath = tbDbPath.Text.Trim();
+            if (string.IsNullOrWhiteSpace(dbPath))
+                errors.Add("数据库路径不能为空");
 
-            if (int.TryParse(tbPollInterval.Text, out int interval))
-                _settings.PollingIntervalMs = interval;
+            // 验证 IP 地址
+            var ipText = tbPlcIp.Text.Trim();
+            if (!IPAddress.TryParse(ipText, out _))
+                errors.Add("IP 地址格式不正确（例如: 192.168.1.100）");
+
+            // 验证端口
+            if (!int.TryParse(tbPlcPort.Text, out int port) || port < 1 || port > 65535)
+                errors.Add("端口必须是 1-65535 之间的整数");
+
+            // 验证轮询间隔
+            if (!int.TryParse(tbPollInterval.Text, out int interval) || interval < 50)
+                errors.Add("轮询周期必须 >= 50 毫秒");
+
+            if (errors.Count > 0)
+            {
+                MessageBox.Show(string.Join("\n", errors), "输入验证失败",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
+            _settings.DatabasePath = dbPath;
+            _settings.PlcIpAddress = ipText;
+            _settings.PlcPort = port;
+            _settings.PollingIntervalMs = interval;
 
             if (cbLogLevel.SelectedItem is System.Windows.Controls.ComboBoxItem item)
                 _settings.LogLevel = item.Content?.ToString() ?? "Info";

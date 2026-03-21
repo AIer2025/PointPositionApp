@@ -191,7 +191,7 @@ namespace PointPositionApp.ViewModels
         public MainViewModel()
         {
             _settings = ConfigService.Load();
-            _modbus = new ModbusService
+            _modbus = new ModbusService(_settings)
             {
                 IpAddress = _settings.PlcIpAddress,
                 Port = _settings.PlcPort
@@ -231,21 +231,17 @@ namespace PointPositionApp.ViewModels
             ClawRotateCommand = new AsyncRelayCommand(async () => await ExecuteClawRotateAsync());
             RefreshTreeCommand = new AsyncRelayCommand(async () => await LoadTreeDataAsync());
 
-            // 初始化（带异常处理）
-            InitializeSafe();
-        }
-
-        private async void InitializeSafe()
-        {
-            try
+            // 初始化（带异常处理，使用 ContinueWith 避免 async void）
+            _ = InitializeAsync().ContinueWith(t =>
             {
-                await InitializeAsync();
-            }
-            catch (Exception ex)
-            {
-                Logger.Error(ex, "初始化失败");
-                StatusMessage = "初始化失败: " + ex.Message;
-            }
+                if (t.IsFaulted)
+                {
+                    var ex = t.Exception?.InnerException ?? t.Exception;
+                    Logger.Error(ex, "初始化失败");
+                    Application.Current?.Dispatcher.Invoke(() =>
+                        StatusMessage = "初始化失败: " + ex?.Message);
+                }
+            }, TaskScheduler.Default);
         }
 
         private async Task InitializeAsync()
@@ -348,7 +344,7 @@ namespace PointPositionApp.ViewModels
             _modbus.JogReverse(axis.Config, start);
         }
 
-        public async void AbsoluteMove(AxisViewModel axis)
+        public async Task AbsoluteMoveAsync(AxisViewModel axis)
         {
             if (!_modbus.IsConnected) return;
             _modbus.WriteAutoSpeed(axis.Config, axis.AutoSpeed);
@@ -500,18 +496,19 @@ namespace PointPositionApp.ViewModels
             StatusMessage = $"已加载 {projects.Count} 个项目";
         }
 
-        /// <summary>安全的树节点选中处理（捕获异常）</summary>
-        private async void OnTreeNodeSelectedSafe(TreeNodeItem? node)
+        /// <summary>安全的树节点选中处理（捕获异常，避免 async void）</summary>
+        private void OnTreeNodeSelectedSafe(TreeNodeItem? node)
         {
-            try
+            _ = OnTreeNodeSelectedAsync(node).ContinueWith(t =>
             {
-                await OnTreeNodeSelectedAsync(node);
-            }
-            catch (Exception ex)
-            {
-                Logger.Error(ex, "树节点选中处理异常");
-                StatusMessage = "加载数据失败: " + ex.Message;
-            }
+                if (t.IsFaulted)
+                {
+                    var ex = t.Exception?.InnerException ?? t.Exception;
+                    Logger.Error(ex, "树节点选中处理异常");
+                    Application.Current?.Dispatcher.Invoke(() =>
+                        StatusMessage = "加载数据失败: " + ex?.Message);
+                }
+            }, TaskScheduler.Default);
         }
 
         private async Task OnTreeNodeSelectedAsync(TreeNodeItem? node)
@@ -600,6 +597,13 @@ namespace PointPositionApp.ViewModels
         private async Task BuildGridAsync(int rows, int cols, string ownerType, int ownerId,
             string[]? rowLabels = null, string[]? colLabels = null)
         {
+            if (rows <= 0 || cols <= 0)
+            {
+                Logger.Warn("网格维度无效: rows={0}, cols={1}", rows, cols);
+                GridCells.Clear();
+                return;
+            }
+
             var points = await _db.GetPointsAsync(ownerType, ownerId);
             var pointMap = points.ToDictionary(p => (p.RowIndex, p.ColIndex));
 
@@ -791,6 +795,7 @@ namespace PointPositionApp.ViewModels
             if (_disposed) return;
             _disposed = true;
             _pollTimer.Stop();
+            _pollTimer.Tick -= PollTimer_Tick;
             _modbus.Dispose();
             _db.Dispose();
         }
