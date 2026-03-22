@@ -21,6 +21,7 @@ namespace PointPositionApp.Views
         private void LoadSettings()
         {
             tbDbPath.Text = _settings.DatabasePath;
+            chkSimulation.IsChecked = _settings.SimulationMode;
             tbPlcIp.Text = _settings.PlcIpAddress;
             tbPlcPort.Text = _settings.PlcPort.ToString();
             tbPollInterval.Text = _settings.PollingIntervalMs.ToString();
@@ -85,6 +86,7 @@ namespace PointPositionApp.Views
             }
 
             _settings.DatabasePath = dbPath;
+            _settings.SimulationMode = chkSimulation.IsChecked == true;
             _settings.PlcIpAddress = ipText;
             _settings.PlcPort = port;
             _settings.PollingIntervalMs = interval;

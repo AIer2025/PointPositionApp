@@ -37,16 +37,22 @@
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
 
-                        <TextBlock Text="IP 地址:" Style="{StaticResource LabelStyle}" Grid.Row="0" Grid.Column="0"/>
-                        <TextBox x:Name="tbPlcIp" Style="{StaticResource DarkTextBox}" Grid.Row="0" Grid.Column="1" Margin="0,2"/>
+                        <TextBlock Text="模拟模式:" Style="{StaticResource LabelStyle}" Grid.Row="0" Grid.Column="0"/>
+                        <CheckBox x:Name="chkSimulation" Grid.Row="0" Grid.Column="1" Margin="0,4"
+                                  Content="启用 PLC 模拟（无需真实硬件）" Foreground="{StaticResource TextPrimaryBrush}"
+                                  VerticalContentAlignment="Center"/>
 
-                        <TextBlock Text="端口:" Style="{StaticResource LabelStyle}" Grid.Row="1" Grid.Column="0"/>
-                        <TextBox x:Name="tbPlcPort" Style="{StaticResource DarkTextBox}" Grid.Row="1" Grid.Column="1" Margin="0,2"/>
+                        <TextBlock Text="IP 地址:" Style="{StaticResource LabelStyle}" Grid.Row="1" Grid.Column="0"/>
+                        <TextBox x:Name="tbPlcIp" Style="{StaticResource DarkTextBox}" Grid.Row="1" Grid.Column="1" Margin="0,2"/>
 
-                        <TextBlock Text="轮询周期(ms):" Style="{StaticResource LabelStyle}" Grid.Row="2" Grid.Column="0"/>
-                        <TextBox x:Name="tbPollInterval" Style="{StaticResource DarkTextBox}" Grid.Row="2" Grid.Column="1" Margin="0,2"/>
+                        <TextBlock Text="端口:" Style="{StaticResource LabelStyle}" Grid.Row="2" Grid.Column="0"/>
+                        <TextBox x:Name="tbPlcPort" Style="{StaticResource DarkTextBox}" Grid.Row="2" Grid.Column="1" Margin="0,2"/>
+
+                        <TextBlock Text="轮询周期(ms):" Style="{StaticResource LabelStyle}" Grid.Row="3" Grid.Column="0"/>
+                        <TextBox x:Name="tbPollInterval" Style="{StaticResource DarkTextBox}" Grid.Row="3" Grid.Column="1" Margin="0,2"/>
                     </Grid>
                 </GroupBox>
 

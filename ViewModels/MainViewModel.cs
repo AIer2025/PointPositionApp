@@ -193,11 +193,11 @@ namespace PointPositionApp.ViewModels
         public MainViewModel()
         {
             _settings = ConfigService.Load();
-            _modbus = new ModbusService(_settings)
-            {
-                IpAddress = _settings.PlcIpAddress,
-                Port = _settings.PlcPort
-            };
+            _modbus = _settings.SimulationMode
+                ? new SimulationModbusService(_settings)
+                : new ModbusService(_settings);
+            _modbus.IpAddress = _settings.PlcIpAddress;
+            _modbus.Port = _settings.PlcPort;
             _db = new DatabaseService(_settings.DatabasePath);
 
             // 初始化轴
@@ -272,7 +272,7 @@ namespace PointPositionApp.ViewModels
             var ok = await _modbus.ConnectAsync();
             if (ok)
             {
-                StatusMessage = "PLC已连接";
+                StatusMessage = _settings.SimulationMode ? "PLC已连接（模拟模式）" : "PLC已连接";
                 // 初始化速度
                 foreach (var ax in Axes)
                 {

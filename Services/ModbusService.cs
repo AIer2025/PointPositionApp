@@ -21,14 +21,14 @@ namespace PointPositionApp.Services
         private TcpClient? _tcpClient;
         private IModbusMaster? _master;
         private readonly object _lock = new();
-        private bool _isConnected;
+        protected bool _isConnected;
         private readonly byte _slaveId;
         private readonly int _connectTimeoutMs;
         private readonly int _readWriteTimeoutMs;
         private readonly int _maxCommErrors;
         private readonly int _modbusRetries;
 
-        public bool IsConnected => _isConnected;
+        public virtual bool IsConnected => _isConnected;
 
         public string IpAddress { get; set; } = "192.168.1.100";
         public int Port { get; set; } = 502;
@@ -43,6 +43,11 @@ namespace PointPositionApp.Services
         }
 
         public event Action<bool>? ConnectionStateChanged;
+
+        protected void OnConnectionStateChanged(bool connected)
+        {
+            ConnectionStateChanged?.Invoke(connected);
+        }
 
         /// <summary>
         /// 带指数退避的自动重连（最多重试3次，间隔 1s, 2s, 4s）
@@ -64,7 +69,7 @@ namespace PointPositionApp.Services
             return false;
         }
 
-        public async Task<bool> ConnectAsync()
+        public virtual async Task<bool> ConnectAsync()
         {
             try
             {
@@ -78,20 +83,20 @@ namespace PointPositionApp.Services
                 _master.Transport.WriteTimeout = _readWriteTimeoutMs;
                 _master.Transport.Retries = _modbusRetries;
                 _isConnected = true;
-                ConnectionStateChanged?.Invoke(true);
+                OnConnectionStateChanged(true);
                 Logger.Info("Modbus TCP 连接成功: {0}:{1}", IpAddress, Port);
                 return true;
             }
             catch (Exception ex)
             {
                 _isConnected = false;
-                ConnectionStateChanged?.Invoke(false);
+                OnConnectionStateChanged(false);
                 Logger.Error(ex, "Modbus TCP 连接失败: {0}:{1}", IpAddress, Port);
                 return false;
             }
         }
 
-        public void Disconnect()
+        public virtual void Disconnect()
         {
             try
             {
@@ -101,14 +106,14 @@ namespace PointPositionApp.Services
             }
             catch { }
             _isConnected = false;
-            ConnectionStateChanged?.Invoke(false);
+            OnConnectionStateChanged(false);
             Logger.Info("Modbus TCP 已断开");
         }
 
         #region 线圈操作
 
         /// <summary>写单个线圈</summary>
-        public bool WriteCoil(ushort address, bool value)
+        public virtual bool WriteCoil(ushort address, bool value)
         {
             if (!_isConnected || _master == null) return false;
             lock (_lock)
@@ -129,7 +134,7 @@ namespace PointPositionApp.Services
         }
 
         /// <summary>读单个线圈</summary>
-        public bool ReadCoil(ushort address, out bool value)
+        public virtual bool ReadCoil(ushort address, out bool value)
         {
             value = false;
             if (!_isConnected || _master == null) return false;
@@ -156,7 +161,7 @@ namespace PointPositionApp.Services
         #region 寄存器操作
 
         /// <summary>写 Float32 到保持寄存器（占2个寄存器，Little-Endian word order）</summary>
-        public bool WriteFloat(ushort address, float value)
+        public virtual bool WriteFloat(ushort address, float value)
         {
             if (!_isConnected || _master == null) return false;
             lock (_lock)
@@ -181,7 +186,7 @@ namespace PointPositionApp.Services
         }
 
         /// <summary>读 Float32</summary>
-        public bool ReadFloat(ushort address, out float value)
+        public virtual bool ReadFloat(ushort address, out float value)
         {
             value = 0;
             if (!_isConnected || _master == null) return false;
@@ -207,7 +212,7 @@ namespace PointPositionApp.Services
         }
 
         /// <summary>写 Int16 到寄存器</summary>
-        public bool WriteInt16(ushort address, short value)
+        public virtual bool WriteInt16(ushort address, short value)
         {
             if (!_isConnected || _master == null) return false;
             lock (_lock)
@@ -228,7 +233,7 @@ namespace PointPositionApp.Services
         }
 
         /// <summary>读 Int16</summary>
-        public bool ReadInt16(ushort address, out short value)
+        public virtual bool ReadInt16(ushort address, out short value)
         {
             value = 0;
             if (!_isConnected || _master == null) return false;
@@ -251,7 +256,7 @@ namespace PointPositionApp.Services
         }
 
         /// <summary>写 UInt16 到寄存器</summary>
-        public bool WriteUInt16(ushort address, ushort value)
+        public virtual bool WriteUInt16(ushort address, ushort value)
         {
             if (!_isConnected || _master == null) return false;
             lock (_lock)
@@ -407,7 +412,7 @@ namespace PointPositionApp.Services
             {
                 _isConnected = false;
                 _commErrorCount = 0;
-                ConnectionStateChanged?.Invoke(false);
+                OnConnectionStateChanged(false);
                 Logger.Warn("PLC 连接已断开（连续错误 {0} 次）", currentCount);
             }
         }

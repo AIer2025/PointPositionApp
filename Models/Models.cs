@@ -166,6 +166,7 @@ namespace PointPositionApp.Models
     public class AppSettings
     {
         public string DatabasePath { get; set; } = "pointposition.db";
+        public bool SimulationMode { get; set; } = false;
         public string PlcIpAddress { get; set; } = "192.168.1.100";
         public int PlcPort { get; set; } = 502;
         public int PollingIntervalMs { get; set; } = 300;
