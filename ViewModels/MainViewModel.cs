@@ -15,6 +15,8 @@ using PointPositionApp.Helpers;
 using PointPositionApp.Models;
 using PointPositionApp.Services;
 
+//测试Git的插件功能
+
 namespace PointPositionApp.ViewModels
 {
     /// <summary>轴运行时视图模型</summary>
