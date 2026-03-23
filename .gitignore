@@ -54,3 +54,4 @@ TestResult.xml
 nunit-*.xml
 .claude/
 .vs/
+.mcp.json
