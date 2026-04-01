@@ -80,7 +80,10 @@ namespace PointPositionApp.Services
                         AbsMoveValue = 16,
                         HomeCoil = 1300,
                         EnableCoil = 1350,
-                        HomePriority = 2
+                        HomePriority = 2,
+                        SoftLimitMin = -10f,
+                        SoftLimitMax = 600f,
+                        SoftLimitEnabled = true
                     },
                     new AxisConfig
                     {
@@ -96,7 +99,10 @@ namespace PointPositionApp.Services
                         AbsMoveValue = 16,
                         HomeCoil = 1301,
                         EnableCoil = 1351,
-                        HomePriority = 2
+                        HomePriority = 2,
+                        SoftLimitMin = -10f,
+                        SoftLimitMax = 400f,
+                        SoftLimitEnabled = true
                     },
                     new AxisConfig
                     {
@@ -112,7 +118,10 @@ namespace PointPositionApp.Services
                         AbsMoveValue = 16,
                         HomeCoil = 1302,
                         EnableCoil = 1352,
-                        HomePriority = 3
+                        HomePriority = 3,
+                        SoftLimitMin = -360f,
+                        SoftLimitMax = 360f,
+                        SoftLimitEnabled = true
                     },
                     new AxisConfig
                     {
@@ -128,7 +137,10 @@ namespace PointPositionApp.Services
                         AbsMoveIsCoil = true,
                         HomeCoil = 840,
                         EnableCoil = 1353,
-                        HomePriority = 1
+                        HomePriority = 1,
+                        SoftLimitMin = -200f,
+                        SoftLimitMax = 5f,
+                        SoftLimitEnabled = true
                     },
                     new AxisConfig
                     {
@@ -144,7 +156,10 @@ namespace PointPositionApp.Services
                         AbsMoveIsCoil = true,
                         HomeCoil = 841,
                         EnableCoil = 1354,
-                        HomePriority = 1
+                        HomePriority = 1,
+                        SoftLimitMin = -200f,
+                        SoftLimitMax = 5f,
+                        SoftLimitEnabled = true
                     }
                 },
                 Claws = new()

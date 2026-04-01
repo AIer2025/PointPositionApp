@@ -32,6 +32,21 @@
                             Command="{Binding ConnectPlcCommand}" Margin="2,0"/>
                     <Button Content="⛔ 断开PLC" Style="{StaticResource DangerButton}"
                             Command="{Binding DisconnectPlcCommand}" Margin="2,0"/>
+
+                    <!-- 急停按钮 — 醒目红色大按钮 -->
+                    <Button Content="■ 急停" FontSize="14" FontWeight="Bold"
+                            Command="{Binding EmergencyStopCommand}"
+                            Background="#FFCC0000" Foreground="White"
+                            Padding="16,4" Margin="10,0,2,0"
+                            BorderBrush="#FFFF0000" BorderThickness="2"
+                            ToolTip="立即停止所有轴运动（快捷键 Esc）"/>
+                    <Button Content="复位急停" FontSize="11"
+                            Click="ResetEStop_Click"
+                            Visibility="{Binding IsEmergencyStopped, Converter={StaticResource BoolToVisibilityConverter}}"
+                            Background="#FF666600" Foreground="White"
+                            Padding="8,4" Margin="2,0"
+                            ToolTip="清除急停状态，恢复操作"/>
+
                     <Button Content="🏠 全轴回原点" Style="{StaticResource SuccessButton}"
                             Command="{Binding HomeAllCommand}" Margin="8,0,2,0"/>
                     <Button Content="🔄 刷新数据" Style="{StaticResource DarkButton}"

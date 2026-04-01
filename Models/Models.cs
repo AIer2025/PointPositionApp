@@ -147,6 +147,11 @@ namespace PointPositionApp.Models
 
         /// <summary>回零优先级，数值小的先回（Z/Z1轴优先）</summary>
         public int HomePriority { get; set; }
+
+        // 安全限位（软限位）
+        public float SoftLimitMin { get; set; } = -9999f;  // 最小位置限位 (mm)
+        public float SoftLimitMax { get; set; } = 9999f;   // 最大位置限位 (mm)
+        public bool SoftLimitEnabled { get; set; } = true;  // 是否启用软限位
     }
 
     /// <summary>夹爪Modbus配置</summary>
@@ -181,6 +186,14 @@ namespace PointPositionApp.Models
 
         public List<AxisConfig> Axes { get; set; } = new();
         public List<ClawModbusConfig> Claws { get; set; } = new();
+
+        // 安全参数
+        public float MaxManualSpeed { get; set; } = 200f;     // 最大手动速度 (mm/s)
+        public float MaxAutoSpeed { get; set; } = 500f;       // 最大自动速度 (mm/s)
+        public float SafeZHeight { get; set; } = 0f;          // Z轴安全高度 (mm)，抬升到此高度再做XY运动
+        public int MotionTimeoutMs { get; set; } = 30000;     // 运动超时时间 (ms)
+        public float PositionTolerance { get; set; } = 0.5f;  // 到位判定容差 (mm)
+        public bool RequireEnableBeforeMotion { get; set; } = true;  // 运动前是否检查轴使能
     }
 
     /// <summary>树节点类型</summary>

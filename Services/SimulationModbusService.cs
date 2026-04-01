@@ -33,10 +33,14 @@ namespace PointPositionApp.Services
 
         // 每轴的运动状态
         private readonly ConcurrentDictionary<string, MotionState> _motionStates = new();
+        private readonly float _maxManualSpeed;
+        private readonly float _maxAutoSpeed;
 
         public SimulationModbusService(AppSettings? settings = null) : base(settings)
         {
             _axes = settings?.Axes ?? new List<AxisConfig>();
+            _maxManualSpeed = settings?.MaxManualSpeed ?? 200f;
+            _maxAutoSpeed = settings?.MaxAutoSpeed ?? 500f;
 
             // 初始化每轴运动状态
             foreach (var axis in _axes)
@@ -259,6 +263,23 @@ namespace PointPositionApp.Services
                         break;
                 }
 
+                // 软限位钳位 — 模拟真实PLC的限位保护
+                if (axis.SoftLimitEnabled)
+                {
+                    if (newPos < axis.SoftLimitMin)
+                    {
+                        newPos = axis.SoftLimitMin;
+                        state.Mode = MotionMode.Idle;
+                        Logger.Warn("[模拟] {0} 触发软下限位: {1:F3}", axis.AxisName, axis.SoftLimitMin);
+                    }
+                    else if (newPos > axis.SoftLimitMax)
+                    {
+                        newPos = axis.SoftLimitMax;
+                        state.Mode = MotionMode.Idle;
+                        Logger.Warn("[模拟] {0} 触发软上限位: {1:F3}", axis.AxisName, axis.SoftLimitMax);
+                    }
+                }
+
                 _floatRegisters[axis.CurrentPosRegister] = newPos;
             }
         }
@@ -266,6 +287,7 @@ namespace PointPositionApp.Services
         private float GetAxisSpeed(AxisConfig axis, MotionMode mode)
         {
             float speed;
+            float maxSpeed;
 
             if (mode == MotionMode.JogForward || mode == MotionMode.JogReverse)
             {
@@ -279,15 +301,17 @@ namespace PointPositionApp.Services
                 {
                     _floatRegisters.TryGetValue(axis.ManualSpeedRegister, out speed);
                 }
+                maxSpeed = _maxManualSpeed;
             }
             else
             {
                 // 自动速度
                 _floatRegisters.TryGetValue(axis.AutoSpeedRegister, out speed);
+                maxSpeed = _maxAutoSpeed;
             }
 
-            // 确保最低速度，避免不动
-            return Math.Max(speed, 10f);
+            // 最低速度10mm/s，上限使用配置的最大速度
+            return Math.Clamp(Math.Abs(speed), 10f, maxSpeed);
         }
 
         #endregion

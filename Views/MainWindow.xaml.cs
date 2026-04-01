@@ -22,6 +22,16 @@ namespace PointPositionApp.Views
             _clockTimer.Tick += (s, e) => tbClock.Text = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
             _clockTimer.Start();
             tbClock.Text = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+
+            // Esc键绑定急停
+            PreviewKeyDown += (s, e) =>
+            {
+                if (e.Key == Key.Escape)
+                {
+                    VM.EmergencyStop();
+                    e.Handled = true;
+                }
+            };
         }
 
         #region 树形导航
@@ -142,6 +152,15 @@ namespace PointPositionApp.Views
         }
 
         #endregion
+
+        private void ResetEStop_Click(object sender, RoutedEventArgs e)
+        {
+            var result = MessageBox.Show(
+                "确认复位急停？\n请先确保所有轴处于安全位置。",
+                "急停复位确认", MessageBoxButton.OKCancel, MessageBoxImage.Warning);
+            if (result == MessageBoxResult.OK)
+                VM.ResetEmergencyStop();
+        }
 
         private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
         {

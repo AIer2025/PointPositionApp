@@ -332,6 +332,59 @@ namespace PointPositionApp.Services
             Logger.Info("{0} 绝对运动 -> {1:F3} mm", axis.AxisName, target);
         }
 
+        /// <summary>
+        /// 等待轴到达目标位置（基于位置反馈轮询），支持取消
+        /// </summary>
+        /// <param name="axis">轴配置</param>
+        /// <param name="targetPos">目标位置</param>
+        /// <param name="tolerance">到位容差 (mm)</param>
+        /// <param name="timeoutMs">超时时间 (ms)</param>
+        /// <param name="cancellationToken">取消令牌（急停用）</param>
+        /// <returns>true=到位, false=超时或取消</returns>
+        public virtual async Task<bool> WaitForPositionAsync(AxisConfig axis, float targetPos,
+            float tolerance = 0.5f, int timeoutMs = 30000, CancellationToken cancellationToken = default)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            while (sw.ElapsedMilliseconds < timeoutMs)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var currentPos = ReadCurrentPosition(axis);
+                if (!float.IsNaN(currentPos) && Math.Abs(currentPos - targetPos) <= tolerance)
+                {
+                    Logger.Info("{0} 到位确认: 当前={1:F3} 目标={2:F3} 容差={3}",
+                        axis.AxisName, currentPos, targetPos, tolerance);
+                    return true;
+                }
+
+                await Task.Delay(100, cancellationToken);
+            }
+
+            Logger.Warn("{0} 运动超时: 目标={1:F3} 超时={2}ms", axis.AxisName, targetPos, timeoutMs);
+            return false;
+        }
+
+        /// <summary>急停 — 停止所有轴的点动，写入全零线圈</summary>
+        public virtual void EmergencyStop(System.Collections.Generic.List<AxisConfig> axes)
+        {
+            Logger.Warn(">>> 急停触发 <<<");
+            foreach (var axis in axes)
+            {
+                WriteCoil(axis.JogForwardCoil, false);
+                WriteCoil(axis.JogReverseCoil, false);
+                // 对线圈触发型绝对运动也复位
+                if (axis.AbsMoveIsCoil)
+                    WriteCoil(axis.AbsMoveRegister, false);
+            }
+        }
+
+        /// <summary>检查目标位置是否在软限位范围内</summary>
+        public static bool CheckSoftLimit(AxisConfig axis, float target)
+        {
+            if (!axis.SoftLimitEnabled) return true;
+            return target >= axis.SoftLimitMin && target <= axis.SoftLimitMax;
+        }
+
         /// <summary>绝对运动（同步版本，内部使用异步等待避免阻塞）</summary>
         public async Task AbsoluteMoveSyncAsync(AxisConfig axis, float target)
         {

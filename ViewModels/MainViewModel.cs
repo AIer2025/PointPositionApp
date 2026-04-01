@@ -81,6 +81,10 @@ namespace PointPositionApp.ViewModels
         private int _isPolling; // 轮询防重入标志（0=空闲，1=忙）
         private bool _disposed;
 
+        // 急停相关
+        private CancellationTokenSource? _motionCts;
+        private bool _isEmergencyStopped;
+
         #region 属性
 
         // 树形导航
@@ -175,6 +179,13 @@ namespace PointPositionApp.ViewModels
 
         #region 命令
 
+        // 急停状态属性
+        public bool IsEmergencyStopped
+        {
+            get => _isEmergencyStopped;
+            set { _isEmergencyStopped = value; OnPropertyChanged(); }
+        }
+
         public ICommand ConnectPlcCommand { get; }
         public ICommand DisconnectPlcCommand { get; }
         public ICommand OpenSettingsCommand { get; }
@@ -187,6 +198,7 @@ namespace PointPositionApp.ViewModels
         public ICommand ClawCloseCommand { get; }
         public ICommand ClawRotateCommand { get; }
         public ICommand RefreshTreeCommand { get; }
+        public ICommand EmergencyStopCommand { get; }
 
         #endregion
 
@@ -232,6 +244,7 @@ namespace PointPositionApp.ViewModels
             ClawCloseCommand = new AsyncRelayCommand(async () => await ExecuteClawCloseAsync());
             ClawRotateCommand = new AsyncRelayCommand(async () => await ExecuteClawRotateAsync());
             RefreshTreeCommand = new AsyncRelayCommand(async () => await LoadTreeDataAsync());
+            EmergencyStopCommand = new RelayCommand(() => EmergencyStop());
 
             // 初始化（带异常处理，使用 ContinueWith 避免 async void）
             _ = InitializeAsync().ContinueWith(t =>
@@ -330,32 +343,127 @@ namespace PointPositionApp.ViewModels
 
         #endregion
 
+        #region 急停
+
+        /// <summary>急停 — 立即停止所有运动，取消进行中的运动序列</summary>
+        public void EmergencyStop()
+        {
+            Logger.Warn(">>> 急停触发 <<<");
+            IsEmergencyStopped = true;
+
+            // 取消正在进行的运动序列（GotoPoint等）
+            _motionCts?.Cancel();
+
+            // 发送停止指令到PLC
+            if (_modbus.IsConnected)
+            {
+                _modbus.EmergencyStop(_settings.Axes);
+            }
+
+            StatusMessage = "!!! 急停已触发 - 所有运动已停止 !!!";
+        }
+
+        /// <summary>复位急停状态</summary>
+        public void ResetEmergencyStop()
+        {
+            IsEmergencyStopped = false;
+            StatusMessage = "急停已复位";
+            Logger.Info("急停已复位");
+        }
+
+        #endregion
+
+        #region 安全校验
+
+        /// <summary>校验速度是否在安全范围内，超限则钳位</summary>
+        private float ClampSpeed(float speed, bool isManual)
+        {
+            float max = isManual ? _settings.MaxManualSpeed : _settings.MaxAutoSpeed;
+            if (speed > max)
+            {
+                Logger.Warn("速度超限: {0} -> 钳位到 {1}", speed, max);
+                return max;
+            }
+            if (speed < 0) return 0;
+            return speed;
+        }
+
+        /// <summary>检查目标位置软限位</summary>
+        private bool ValidateSoftLimit(AxisConfig axis, float target)
+        {
+            if (!ModbusService.CheckSoftLimit(axis, target))
+            {
+                var msg = $"{axis.AxisName} 目标位置 {target:F3}mm 超出软限位范围 [{axis.SoftLimitMin}, {axis.SoftLimitMax}]";
+                Logger.Warn(msg);
+                StatusMessage = $"安全拦截: {msg}";
+                return false;
+            }
+            return true;
+        }
+
+        /// <summary>运动前安全检查（连接、急停、使能）</summary>
+        private bool PreMotionCheck(AxisConfig? axis = null)
+        {
+            if (!_modbus.IsConnected)
+            {
+                StatusMessage = "PLC未连接";
+                return false;
+            }
+            if (IsEmergencyStopped)
+            {
+                StatusMessage = "急停状态，请先复位后再操作";
+                return false;
+            }
+            if (axis != null && _settings.RequireEnableBeforeMotion)
+            {
+                if (!_modbus.ReadAxisEnable(axis))
+                {
+                    StatusMessage = $"{axis.AxisName} 未使能，请先使能轴";
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        #endregion
+
         #region 轴控制（供UI事件调用）
 
         public void JogForward(AxisViewModel axis, bool start)
         {
-            if (!_modbus.IsConnected) return;
-            if (start) _modbus.WriteManualSpeed(axis.Config, axis.ManualSpeed);
+            if (!PreMotionCheck(start ? axis.Config : null)) return;
+            if (start)
+            {
+                axis.ManualSpeed = ClampSpeed(axis.ManualSpeed, true);
+                _modbus.WriteManualSpeed(axis.Config, axis.ManualSpeed);
+            }
             _modbus.JogForward(axis.Config, start);
         }
 
         public void JogReverse(AxisViewModel axis, bool start)
         {
-            if (!_modbus.IsConnected) return;
-            if (start) _modbus.WriteManualSpeed(axis.Config, axis.ManualSpeed);
+            if (!PreMotionCheck(start ? axis.Config : null)) return;
+            if (start)
+            {
+                axis.ManualSpeed = ClampSpeed(axis.ManualSpeed, true);
+                _modbus.WriteManualSpeed(axis.Config, axis.ManualSpeed);
+            }
             _modbus.JogReverse(axis.Config, start);
         }
 
         public async Task AbsoluteMoveAsync(AxisViewModel axis)
         {
-            if (!_modbus.IsConnected) return;
+            if (!PreMotionCheck(axis.Config)) return;
+            if (!ValidateSoftLimit(axis.Config, axis.TargetPosition)) return;
+
+            axis.AutoSpeed = ClampSpeed(axis.AutoSpeed, false);
             _modbus.WriteAutoSpeed(axis.Config, axis.AutoSpeed);
             await _modbus.AbsoluteMoveAsync(axis.Config, axis.TargetPosition);
         }
 
         public void HomeAxis(AxisViewModel axis)
         {
-            if (!_modbus.IsConnected) return;
+            if (!PreMotionCheck()) return;
             _modbus.Home(axis.Config);
         }
 
@@ -368,43 +476,68 @@ namespace PointPositionApp.ViewModels
         public void WriteManualSpeed(AxisViewModel axis)
         {
             if (!_modbus.IsConnected) return;
+            axis.ManualSpeed = ClampSpeed(axis.ManualSpeed, true);
             _modbus.WriteManualSpeed(axis.Config, axis.ManualSpeed);
         }
 
         public void WriteAutoSpeed(AxisViewModel axis)
         {
             if (!_modbus.IsConnected) return;
+            axis.AutoSpeed = ClampSpeed(axis.AutoSpeed, false);
             _modbus.WriteAutoSpeed(axis.Config, axis.AutoSpeed);
         }
 
         #endregion
 
-        #region 回原点（Z/Z1轴先回）
+        #region 回原点（Z/Z1轴先回，等待位置反馈到位）
 
         private async Task HomeAllAxesAsync()
         {
-            if (!_modbus.IsConnected)
-            {
-                StatusMessage = "PLC未连接";
-                return;
-            }
+            if (!PreMotionCheck()) return;
+
+            _motionCts?.Cancel();
+            _motionCts = new CancellationTokenSource();
+            var ct = _motionCts.Token;
 
             StatusMessage = "全轴回原点中...";
 
-            // 按优先级分组
-            var groups = Axes.GroupBy(a => a.Config.HomePriority).OrderBy(g => g.Key);
-
-            foreach (var group in groups)
+            try
             {
-                foreach (var ax in group)
-                {
-                    _modbus.Home(ax.Config);
-                }
-                // 等一段时间让高优先级轴先动作
-                await Task.Delay(2000);
-            }
+                // 按优先级分组
+                var groups = Axes.GroupBy(a => a.Config.HomePriority).OrderBy(g => g.Key);
 
-            StatusMessage = "回原点指令已发送";
+                foreach (var group in groups)
+                {
+                    ct.ThrowIfCancellationRequested();
+
+                    var axesInGroup = group.ToList();
+                    foreach (var ax in axesInGroup)
+                    {
+                        _modbus.Home(ax.Config);
+                    }
+
+                    // 等待该优先级组所有轴回到原点（位置0）
+                    var waitTasks = axesInGroup.Select(ax =>
+                        _modbus.WaitForPositionAsync(ax.Config, 0f,
+                            _settings.PositionTolerance, _settings.MotionTimeoutMs, ct));
+                    var results = await Task.WhenAll(waitTasks);
+
+                    if (results.Any(r => !r))
+                    {
+                        var failedAxes = axesInGroup.Where((ax, i) => !results[i])
+                            .Select(ax => ax.Config.AxisName);
+                        StatusMessage = $"回原点超时: {string.Join(", ", failedAxes)}";
+                        Logger.Warn("回原点部分超时: {0}", string.Join(", ", failedAxes));
+                        return;
+                    }
+                }
+
+                StatusMessage = "全轴回原点完成";
+            }
+            catch (OperationCanceledException)
+            {
+                StatusMessage = "回原点已取消（急停）";
+            }
         }
 
         #endregion
@@ -666,6 +799,16 @@ namespace PointPositionApp.ViewModels
                 point.R = Axes.Count > 2 ? Axes[2].CurrentPosition : 0;
                 point.Z = Axes.Count > 3 ? Axes[3].CurrentPosition : 0;   // Z1轴 -> DB.Z
                 point.Z1 = Axes.Count > 4 ? Axes[4].CurrentPosition : 0;  // Z2轴 -> DB.Z1
+
+                // 检查是否有无效位置值（NaN说明读取失败）
+                if (float.IsNaN((float)point.X) || float.IsNaN((float)point.Y) ||
+                    float.IsNaN((float)point.Z) || float.IsNaN((float)point.Z1) ||
+                    float.IsNaN((float)point.R))
+                {
+                    StatusMessage = "保存失败: 部分轴位置读取无效(NaN)，请检查通信";
+                    Logger.Warn("保存点位失败: 存在NaN位置值");
+                    return;
+                }
             }
             // PLC未连接时所有坐标值保持默认0
 
@@ -693,68 +836,152 @@ namespace PointPositionApp.ViewModels
         }
 
         /// <summary>
-        /// 安全跳转到选中点位
-        /// 运动顺序: 1.先抬Z轴到0（安全高度） 2.移动XY/R 3.下降Z轴到目标位置
+        /// 安全跳转到选中点位（带防撞保护）
+        /// 运动顺序: 1.先抬Z轴到安全高度 2.等待Z到位 3.移动XY/R 4.等待XY/R到位 5.下降Z轴
+        /// 全程基于位置反馈确认到位，支持急停取消
         /// </summary>
         private async Task GotoSelectedPointAsync()
         {
-            if (_selectedCell?.Point == null || !_modbus.IsConnected) return;
+            if (_selectedCell?.Point == null) return;
+            if (!PreMotionCheck()) return;
 
             var p = _selectedCell.Point;
-            StatusMessage = $"跳转中: [{_selectedCell.RowIndex},{_selectedCell.ColIndex}] - 抬升Z轴...";
+            var cellLabel = $"[{_selectedCell.RowIndex},{_selectedCell.ColIndex}]";
 
-            // 第1步: 先抬Z轴到安全高度（位置0），防止水平移动时碰撞
-            if (Axes.Count > 3)
+            // 软限位预检查 — 所有目标位置必须在安全范围内
+            var targets = new (int axisIdx, float target, string name)[]
             {
-                Axes[3].TargetPosition = 0;
-                await _modbus.AbsoluteMoveAsync(Axes[3].Config, 0);
-            }
-            if (Axes.Count > 4)
+                (0, (float)p.X, "X"), (1, (float)p.Y, "Y"), (2, (float)p.R, "R"),
+                (3, (float)p.Z, "Z1"), (4, (float)p.Z1, "Z2")
+            };
+            foreach (var (axisIdx, target, name) in targets)
             {
-                Axes[4].TargetPosition = 0;
-                await _modbus.AbsoluteMoveAsync(Axes[4].Config, 0);
-            }
-
-            // 等待Z轴抬升到位
-            await Task.Delay(1500);
-
-            StatusMessage = $"跳转中: [{_selectedCell.RowIndex},{_selectedCell.ColIndex}] - 移动XY/R...";
-
-            // 第2步: 移动XY和R轴到目标位置
-            if (Axes.Count > 0)
-            {
-                Axes[0].TargetPosition = (float)p.X;
-                await _modbus.AbsoluteMoveAsync(Axes[0].Config, (float)p.X);
-            }
-            if (Axes.Count > 1)
-            {
-                Axes[1].TargetPosition = (float)p.Y;
-                await _modbus.AbsoluteMoveAsync(Axes[1].Config, (float)p.Y);
-            }
-            if (Axes.Count > 2)
-            {
-                Axes[2].TargetPosition = (float)p.R;
-                await _modbus.AbsoluteMoveAsync(Axes[2].Config, (float)p.R);
+                if (Axes.Count > axisIdx && !ValidateSoftLimit(Axes[axisIdx].Config, target))
+                    return;
             }
 
-            // 等待XY/R到位
-            await Task.Delay(2000);
+            // 用户确认
+            var confirmResult = MessageBox.Show(
+                $"即将跳转到点位 {cellLabel}\n" +
+                $"X={p.X:F3} Y={p.Y:F3} R={p.R:F3}\n" +
+                $"Z1={p.Z:F3} Z2={p.Z1:F3}\n\n" +
+                "确认执行运动？",
+                "运动确认", MessageBoxButton.OKCancel, MessageBoxImage.Question);
+            if (confirmResult != MessageBoxResult.OK) return;
 
-            StatusMessage = $"跳转中: [{_selectedCell.RowIndex},{_selectedCell.ColIndex}] - 下降Z轴...";
+            // 创建新的取消令牌（急停用）
+            _motionCts?.Cancel();
+            _motionCts = new CancellationTokenSource();
+            var ct = _motionCts.Token;
+            float safeZ = _settings.SafeZHeight;
+            float tolerance = _settings.PositionTolerance;
+            int timeout = _settings.MotionTimeoutMs;
 
-            // 第3步: Z轴下降到目标位置
-            if (Axes.Count > 3)
+            try
             {
-                Axes[3].TargetPosition = (float)p.Z;
-                await _modbus.AbsoluteMoveAsync(Axes[3].Config, (float)p.Z);
-            }
-            if (Axes.Count > 4)
-            {
-                Axes[4].TargetPosition = (float)p.Z1;
-                await _modbus.AbsoluteMoveAsync(Axes[4].Config, (float)p.Z1);
-            }
+                // === 第1步: 先抬Z轴到安全高度，防止水平移动时碰撞 ===
+                StatusMessage = $"跳转中: {cellLabel} - 抬升Z轴到安全高度({safeZ}mm)...";
 
-            StatusMessage = $"已跳转到点位: [{_selectedCell.RowIndex},{_selectedCell.ColIndex}]";
+                var zWaitTasks = new List<Task<bool>>();
+                if (Axes.Count > 3)
+                {
+                    Axes[3].TargetPosition = safeZ;
+                    await _modbus.AbsoluteMoveAsync(Axes[3].Config, safeZ);
+                    zWaitTasks.Add(_modbus.WaitForPositionAsync(Axes[3].Config, safeZ, tolerance, timeout, ct));
+                }
+                if (Axes.Count > 4)
+                {
+                    Axes[4].TargetPosition = safeZ;
+                    await _modbus.AbsoluteMoveAsync(Axes[4].Config, safeZ);
+                    zWaitTasks.Add(_modbus.WaitForPositionAsync(Axes[4].Config, safeZ, tolerance, timeout, ct));
+                }
+
+                if (zWaitTasks.Count > 0)
+                {
+                    var zResults = await Task.WhenAll(zWaitTasks);
+                    if (zResults.Any(r => !r))
+                    {
+                        StatusMessage = $"跳转失败: Z轴抬升超时，已中止后续运动";
+                        Logger.Error("GotoPoint中止: Z轴未能在{0}ms内到达安全高度", timeout);
+                        return;
+                    }
+                }
+
+                ct.ThrowIfCancellationRequested();
+
+                // === 第2步: Z轴已确认到位，开始移动XY和R轴 ===
+                StatusMessage = $"跳转中: {cellLabel} - 移动XY/R...";
+
+                var xyWaitTasks = new List<Task<bool>>();
+                if (Axes.Count > 0)
+                {
+                    Axes[0].TargetPosition = (float)p.X;
+                    await _modbus.AbsoluteMoveAsync(Axes[0].Config, (float)p.X);
+                    xyWaitTasks.Add(_modbus.WaitForPositionAsync(Axes[0].Config, (float)p.X, tolerance, timeout, ct));
+                }
+                if (Axes.Count > 1)
+                {
+                    Axes[1].TargetPosition = (float)p.Y;
+                    await _modbus.AbsoluteMoveAsync(Axes[1].Config, (float)p.Y);
+                    xyWaitTasks.Add(_modbus.WaitForPositionAsync(Axes[1].Config, (float)p.Y, tolerance, timeout, ct));
+                }
+                if (Axes.Count > 2)
+                {
+                    Axes[2].TargetPosition = (float)p.R;
+                    await _modbus.AbsoluteMoveAsync(Axes[2].Config, (float)p.R);
+                    xyWaitTasks.Add(_modbus.WaitForPositionAsync(Axes[2].Config, (float)p.R, tolerance, timeout, ct));
+                }
+
+                if (xyWaitTasks.Count > 0)
+                {
+                    var xyResults = await Task.WhenAll(xyWaitTasks);
+                    if (xyResults.Any(r => !r))
+                    {
+                        StatusMessage = $"跳转失败: XY/R轴运动超时，Z轴保持安全高度";
+                        Logger.Error("GotoPoint中止: XY/R轴未能在{0}ms内到位", timeout);
+                        return;
+                    }
+                }
+
+                ct.ThrowIfCancellationRequested();
+
+                // === 第3步: XY/R已到位，Z轴下降到目标位置 ===
+                StatusMessage = $"跳转中: {cellLabel} - 下降Z轴...";
+
+                var zDownTasks = new List<Task<bool>>();
+                if (Axes.Count > 3)
+                {
+                    Axes[3].TargetPosition = (float)p.Z;
+                    await _modbus.AbsoluteMoveAsync(Axes[3].Config, (float)p.Z);
+                    zDownTasks.Add(_modbus.WaitForPositionAsync(Axes[3].Config, (float)p.Z, tolerance, timeout, ct));
+                }
+                if (Axes.Count > 4)
+                {
+                    Axes[4].TargetPosition = (float)p.Z1;
+                    await _modbus.AbsoluteMoveAsync(Axes[4].Config, (float)p.Z1);
+                    zDownTasks.Add(_modbus.WaitForPositionAsync(Axes[4].Config, (float)p.Z1, tolerance, timeout, ct));
+                }
+
+                if (zDownTasks.Count > 0)
+                {
+                    var zDownResults = await Task.WhenAll(zDownTasks);
+                    if (zDownResults.Any(r => !r))
+                    {
+                        StatusMessage = $"跳转警告: Z轴下降超时，请检查位置";
+                        Logger.Warn("GotoPoint: Z轴下降超时");
+                        return;
+                    }
+                }
+
+                StatusMessage = $"已跳转到点位: {cellLabel}";
+                Logger.Info("GotoPoint完成: {0} X={1:F3} Y={2:F3} Z={3:F3} Z1={4:F3} R={5:F3}",
+                    cellLabel, p.X, p.Y, p.Z, p.Z1, p.R);
+            }
+            catch (OperationCanceledException)
+            {
+                StatusMessage = $"跳转已取消（急停）- Z轴可能未在安全高度，请手动确认！";
+                Logger.Warn("GotoPoint被急停取消");
+            }
         }
 
         private async Task CopyRowAsync(object? parameter)
