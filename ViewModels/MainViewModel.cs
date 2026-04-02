@@ -205,6 +205,13 @@ namespace PointPositionApp.ViewModels
         public MainViewModel()
         {
             _settings = ConfigService.Load();
+            Logger.Info("========== 应用初始化 ==========");
+            Logger.Info("模拟模式: {0}, PLC地址: {1}:{2}", _settings.SimulationMode, _settings.PlcIpAddress, _settings.PlcPort);
+            Logger.Info("配置: SlaveId={0}, 轮询间隔={1}ms, 连接超时={2}ms, 读写超时={3}ms",
+                _settings.SlaveId, _settings.PollingIntervalMs, _settings.ConnectTimeoutMs, _settings.ReadWriteTimeoutMs);
+            Logger.Info("安全参数: 最大手动速度={0}, 最大自动速度={1}, 安全Z高度={2}, 运动超时={3}ms, 到位容差={4}",
+                _settings.MaxManualSpeed, _settings.MaxAutoSpeed, _settings.SafeZHeight, _settings.MotionTimeoutMs, _settings.PositionTolerance);
+
             _modbus = _settings.SimulationMode
                 ? new SimulationModbusService(_settings)
                 : new ModbusService(_settings);
@@ -215,6 +222,10 @@ namespace PointPositionApp.ViewModels
             // 初始化轴
             foreach (var axCfg in _settings.Axes)
             {
+                Logger.Info("加载轴配置: {0} - 点动M{1}/M{2}, 位置D{3}, 使能M{4}, 触发{5}",
+                    axCfg.AxisName, axCfg.JogForwardCoil, axCfg.JogReverseCoil,
+                    axCfg.CurrentPosRegister, axCfg.EnableCoil,
+                    axCfg.AbsMoveIsCoil ? $"M{axCfg.AbsMoveRegister}" : $"D{axCfg.AbsMoveRegister}={axCfg.AbsMoveValue}");
                 Axes.Add(new AxisViewModel(axCfg));
             }
 
@@ -279,6 +290,9 @@ namespace PointPositionApp.ViewModels
 
         private async Task ConnectPlcAsync()
         {
+            Logger.Info("========== 连接PLC开始 ==========");
+            Logger.Info("目标地址: {0}:{1}, 模拟模式: {2}, SlaveId: {3}",
+                _settings.PlcIpAddress, _settings.PlcPort, _settings.SimulationMode, _settings.SlaveId);
             StatusMessage = "正在连接PLC...";
             _modbus.IpAddress = _settings.PlcIpAddress;
             _modbus.Port = _settings.PlcPort;
@@ -286,22 +300,29 @@ namespace PointPositionApp.ViewModels
             if (ok)
             {
                 StatusMessage = _settings.SimulationMode ? "PLC已连接（模拟模式）" : "PLC已连接";
-                // 初始化速度
+                Logger.Info("PLC连接成功，开始初始化各轴参数...");
+                // 初始化速度并同步使能状态
                 foreach (var ax in Axes)
                 {
+                    Logger.Info("初始化 {0}: 手动速度={1:F1}, 自动速度={2:F1}, 使能={3}",
+                        ax.Config.AxisName, ax.ManualSpeed, ax.AutoSpeed, ax.IsEnabled);
                     _modbus.WriteManualSpeed(ax.Config, ax.ManualSpeed);
                     _modbus.WriteAutoSpeed(ax.Config, ax.AutoSpeed);
+                    _modbus.SetAxisEnable(ax.Config, ax.IsEnabled);
                 }
+                Logger.Info("轴初始化完成，启动轮询 (间隔={0}ms)", _settings.PollingIntervalMs);
                 _pollTimer.Start();
             }
             else
             {
+                Logger.Error("PLC连接失败: {0}:{1}", _settings.PlcIpAddress, _settings.PlcPort);
                 StatusMessage = "PLC连接失败";
             }
         }
 
         private void DisconnectPlc()
         {
+            Logger.Info("断开PLC连接");
             _pollTimer.Stop();
             _modbus.Disconnect();
             StatusMessage = "PLC已断开";
@@ -406,11 +427,13 @@ namespace PointPositionApp.ViewModels
         {
             if (!_modbus.IsConnected)
             {
+                Logger.Warn("PreMotionCheck 失败: PLC未连接");
                 StatusMessage = "PLC未连接";
                 return false;
             }
             if (IsEmergencyStopped)
             {
+                Logger.Warn("PreMotionCheck 失败: 急停状态");
                 StatusMessage = "急停状态，请先复位后再操作";
                 return false;
             }
@@ -418,6 +441,7 @@ namespace PointPositionApp.ViewModels
             {
                 if (!_modbus.ReadAxisEnable(axis))
                 {
+                    Logger.Warn("PreMotionCheck 失败: {0} 未使能 (M{1})", axis.AxisName, axis.EnableCoil);
                     StatusMessage = $"{axis.AxisName} 未使能，请先使能轴";
                     return false;
                 }

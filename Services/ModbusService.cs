@@ -115,13 +115,18 @@ namespace PointPositionApp.Services
         /// <summary>写单个线圈</summary>
         public virtual bool WriteCoil(ushort address, bool value)
         {
-            if (!_isConnected || _master == null) return false;
+            if (!_isConnected || _master == null)
+            {
+                Logger.Warn("写线圈跳过(未连接): M{0}={1}", address, value);
+                return false;
+            }
             lock (_lock)
             {
                 try
                 {
                     _master.WriteSingleCoil(_slaveId, address, value);
                     ResetCommErrorCount();
+                    Logger.Info("写线圈成功: M{0} = {1}", address, value);
                     return true;
                 }
                 catch (Exception ex)
@@ -145,6 +150,7 @@ namespace PointPositionApp.Services
                     var result = _master.ReadCoils(_slaveId, address, 1);
                     value = result[0];
                     ResetCommErrorCount();
+                    Logger.Debug("读线圈: M{0} = {1}", address, value);
                     return true;
                 }
                 catch (Exception ex)
@@ -163,7 +169,11 @@ namespace PointPositionApp.Services
         /// <summary>写 Float32 到保持寄存器（占2个寄存器，Little-Endian word order）</summary>
         public virtual bool WriteFloat(ushort address, float value)
         {
-            if (!_isConnected || _master == null) return false;
+            if (!_isConnected || _master == null)
+            {
+                Logger.Warn("写Float跳过(未连接): D{0}={1:F3}", address, value);
+                return false;
+            }
             lock (_lock)
             {
                 try
@@ -174,11 +184,12 @@ namespace PointPositionApp.Services
                     // 汇川PLC: 低字在前
                     _master.WriteMultipleRegisters(_slaveId, address, new ushort[] { low, high });
                     ResetCommErrorCount();
+                    Logger.Info("写Float成功: D{0} = {1:F3} (raw: 0x{2:X4} 0x{3:X4})", address, value, low, high);
                     return true;
                 }
                 catch (Exception ex)
                 {
-                    Logger.Error(ex, "写Float失败: D{0}={1}", address, value);
+                    Logger.Error(ex, "写Float失败: D{0}={1:F3}", address, value);
                     HandleCommError();
                     return false;
                 }
@@ -200,6 +211,7 @@ namespace PointPositionApp.Services
                     BitConverter.GetBytes(regs[1]).CopyTo(bytes, 2);
                     value = BitConverter.ToSingle(bytes, 0);
                     ResetCommErrorCount();
+                    Logger.Debug("读Float: D{0} = {1:F3} (raw: 0x{2:X4} 0x{3:X4})", address, value, regs[0], regs[1]);
                     return true;
                 }
                 catch (Exception ex)
@@ -214,13 +226,18 @@ namespace PointPositionApp.Services
         /// <summary>写 Int16 到寄存器</summary>
         public virtual bool WriteInt16(ushort address, short value)
         {
-            if (!_isConnected || _master == null) return false;
+            if (!_isConnected || _master == null)
+            {
+                Logger.Warn("写Int16跳过(未连接): D{0}={1}", address, value);
+                return false;
+            }
             lock (_lock)
             {
                 try
                 {
                     _master.WriteSingleRegister(_slaveId, address, (ushort)value);
                     ResetCommErrorCount();
+                    Logger.Info("写Int16成功: D{0} = {1}", address, value);
                     return true;
                 }
                 catch (Exception ex)
@@ -244,6 +261,7 @@ namespace PointPositionApp.Services
                     var regs = _master.ReadHoldingRegisters(_slaveId, address, 1);
                     value = (short)regs[0];
                     ResetCommErrorCount();
+                    Logger.Debug("读Int16: D{0} = {1}", address, value);
                     return true;
                 }
                 catch (Exception ex)
@@ -258,13 +276,18 @@ namespace PointPositionApp.Services
         /// <summary>写 UInt16 到寄存器</summary>
         public virtual bool WriteUInt16(ushort address, ushort value)
         {
-            if (!_isConnected || _master == null) return false;
+            if (!_isConnected || _master == null)
+            {
+                Logger.Warn("写UInt16跳过(未连接): D{0}={1}", address, value);
+                return false;
+            }
             lock (_lock)
             {
                 try
                 {
                     _master.WriteSingleRegister(_slaveId, address, value);
                     ResetCommErrorCount();
+                    Logger.Info("写UInt16成功: D{0} = {1}", address, value);
                     return true;
                 }
                 catch (Exception ex)
@@ -283,15 +306,15 @@ namespace PointPositionApp.Services
         /// <summary>点动正向</summary>
         public void JogForward(AxisConfig axis, bool start)
         {
+            Logger.Info("{0} 点动正向: {1} (线圈 M{2})", axis.AxisName, start ? "开始" : "停止", axis.JogForwardCoil);
             WriteCoil(axis.JogForwardCoil, start);
-            Logger.Debug("{0} 点动正向: {1}", axis.AxisName, start ? "开始" : "停止");
         }
 
         /// <summary>点动反向</summary>
         public void JogReverse(AxisConfig axis, bool start)
         {
+            Logger.Info("{0} 点动反向: {1} (线圈 M{2})", axis.AxisName, start ? "开始" : "停止", axis.JogReverseCoil);
             WriteCoil(axis.JogReverseCoil, start);
-            Logger.Debug("{0} 点动反向: {1}", axis.AxisName, start ? "开始" : "停止");
         }
 
         /// <summary>读取当前位置</summary>
@@ -299,12 +322,15 @@ namespace PointPositionApp.Services
         {
             if (ReadFloat(axis.CurrentPosRegister, out float pos))
                 return pos;
+            Logger.Warn("{0} 读取位置失败 (D{1})", axis.AxisName, axis.CurrentPosRegister);
             return float.NaN;
         }
 
         /// <summary>写手动速度</summary>
         public void WriteManualSpeed(AxisConfig axis, float speed)
         {
+            Logger.Info("{0} 写手动速度: {1:F1} (D{2}, 类型={3})",
+                axis.AxisName, speed, axis.ManualSpeedRegister, axis.ManualSpeedIsInt16 ? "Int16" : "Float");
             if (axis.ManualSpeedIsInt16)
                 WriteInt16(axis.ManualSpeedRegister, (short)speed);
             else
@@ -314,12 +340,16 @@ namespace PointPositionApp.Services
         /// <summary>写自动速度</summary>
         public void WriteAutoSpeed(AxisConfig axis, float speed)
         {
+            Logger.Info("{0} 写自动速度: {1:F1} (D{2})", axis.AxisName, speed, axis.AutoSpeedRegister);
             WriteFloat(axis.AutoSpeedRegister, speed);
         }
 
         /// <summary>绝对运动（异步，避免阻塞UI线程）</summary>
         public async Task AbsoluteMoveAsync(AxisConfig axis, float target)
         {
+            Logger.Info("{0} 绝对运动开始: 目标={1:F3}mm, 目标寄存器=D{2}, 触发={3}",
+                axis.AxisName, target, axis.TargetPosRegister,
+                axis.AbsMoveIsCoil ? $"M{axis.AbsMoveRegister}" : $"D{axis.AbsMoveRegister}={axis.AbsMoveValue}");
             // 先写目标位置
             WriteFloat(axis.TargetPosRegister, target);
             await Task.Delay(50);
@@ -329,7 +359,7 @@ namespace PointPositionApp.Services
             else
                 WriteUInt16(axis.AbsMoveRegister, axis.AbsMoveValue);
 
-            Logger.Info("{0} 绝对运动 -> {1:F3} mm", axis.AxisName, target);
+            Logger.Info("{0} 绝对运动触发完成 -> {1:F3} mm", axis.AxisName, target);
         }
 
         /// <summary>
@@ -401,54 +431,61 @@ namespace PointPositionApp.Services
         /// <summary>回原点</summary>
         public void Home(AxisConfig axis)
         {
+            Logger.Info("{0} 回原点触发 (线圈 M{1})", axis.AxisName, axis.HomeCoil);
             WriteCoil(axis.HomeCoil, true);
-            Logger.Info("{0} 回原点触发", axis.AxisName);
         }
 
         /// <summary>使能/禁用轴</summary>
         public void SetAxisEnable(AxisConfig axis, bool enable)
         {
+            Logger.Info("{0} 使能={1} (线圈 M{2})", axis.AxisName, enable, axis.EnableCoil);
             WriteCoil(axis.EnableCoil, enable);
-            Logger.Info("{0} 使能: {1}", axis.AxisName, enable);
         }
 
         /// <summary>读轴使能状态</summary>
         public bool ReadAxisEnable(AxisConfig axis)
         {
             if (ReadCoil(axis.EnableCoil, out bool val))
+            {
+                Logger.Debug("{0} 读使能状态: M{1} = {2}", axis.AxisName, axis.EnableCoil, val);
                 return val;
+            }
+            Logger.Warn("{0} 读使能状态失败: M{1}", axis.AxisName, axis.EnableCoil);
             return false;
         }
 
         /// <summary>夹爪打开（异步）</summary>
         public async Task ClawOpenAsync(ClawModbusConfig claw, float openPos, float openTorque)
         {
+            Logger.Info("夹爪打开: Pos={0:F1}, Torque={1:F1} (位置D{2}, 线圈M{3})",
+                openPos, openTorque, claw.OpenPosRegister, claw.OpenCoil);
             WriteFloat(claw.OpenPosRegister, openPos);
             if (claw.OpenTorqueRegister > 0)
                 WriteFloat(claw.OpenTorqueRegister, openTorque);
             await Task.Delay(30);
             WriteCoil(claw.OpenCoil, true);
-            Logger.Info("夹爪打开: Pos={0:F1}", openPos);
         }
 
         /// <summary>夹爪关闭（异步）</summary>
         public async Task ClawCloseAsync(ClawModbusConfig claw, float closePos, float closeTorque)
         {
-            WriteFloat(claw.OpenPosRegister, closePos); // 复用位置寄存器
+            Logger.Info("夹爪关闭: Pos={0:F1}, Torque={1:F1} (位置D{2}, 线圈M{3})",
+                closePos, closeTorque, claw.OpenPosRegister, claw.CloseCoil);
+            WriteFloat(claw.OpenPosRegister, closePos);
             if (claw.CloseTorqueRegister > 0)
                 WriteFloat(claw.CloseTorqueRegister, closeTorque);
             await Task.Delay(30);
             WriteCoil(claw.CloseCoil, true);
-            Logger.Info("夹爪关闭: Pos={0:F1}", closePos);
         }
 
         /// <summary>夹爪旋转（异步）</summary>
         public async Task ClawRotateAsync(ClawModbusConfig claw, float angle)
         {
+            Logger.Info("夹爪旋转: Angle={0:F1} (角度D{1}, 线圈M{2})",
+                angle, claw.AngleRegister, claw.RotateCoil);
             WriteFloat(claw.AngleRegister, angle);
             await Task.Delay(30);
             WriteCoil(claw.RotateCoil, true);
-            Logger.Info("夹爪旋转: Angle={0:F1}", angle);
         }
 
         #endregion

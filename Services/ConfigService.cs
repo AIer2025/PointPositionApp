@@ -24,8 +24,27 @@ namespace PointPositionApp.Services
                     var settings = JsonConvert.DeserializeObject<AppSettings>(json);
                     if (settings != null)
                     {
-                        Logger.Info("配置已加载: {0}", ConfigPath);
+                        // 如果 Axes/Claws 为空，用默认值填充
+                        var defaults = CreateDefaults();
+                        if (settings.Axes == null || settings.Axes.Count == 0)
+                        {
+                            Logger.Warn("配置中 Axes 为空，使用默认轴配置");
+                            settings.Axes = defaults.Axes;
+                        }
+                        if (settings.Claws == null || settings.Claws.Count == 0)
+                        {
+                            Logger.Warn("配置中 Claws 为空，使用默认夹爪配置");
+                            settings.Claws = defaults.Claws;
+                        }
+                        Logger.Info("配置已加载: {0} (轴数={1}, 夹爪数={2})",
+                            ConfigPath, settings.Axes.Count, settings.Claws.Count);
+                        Save(settings);
                         return settings;
+                    }
+                    else
+                    {
+                        Logger.Warn("配置反序列化返回null，JSON内容: {0}",
+                            json.Length > 200 ? json.Substring(0, 200) + "..." : json);
                     }
                 }
             }
@@ -34,9 +53,9 @@ namespace PointPositionApp.Services
                 Logger.Error(ex, "加载配置失败，使用默认配置");
             }
 
-            var defaults = CreateDefaults();
-            Save(defaults);
-            return defaults;
+            var fallback = CreateDefaults();
+            Save(fallback);
+            return fallback;
         }
 
         /// <summary>保存配置</summary>
