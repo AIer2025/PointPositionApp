@@ -156,6 +156,7 @@ namespace PointPositionApp.Services
                         AbsMoveIsCoil = true,
                         HomeCoil = 840,
                         EnableCoil = 1353,
+                        RequireEnable = false,  // 步进电机无使能功能
                         HomePriority = 1,
                         SoftLimitMin = -200f,
                         SoftLimitMax = 5f,
@@ -175,6 +176,7 @@ namespace PointPositionApp.Services
                         AbsMoveIsCoil = true,
                         HomeCoil = 841,
                         EnableCoil = 1354,
+                        RequireEnable = false,  // 步进电机无使能功能
                         HomePriority = 1,
                         SoftLimitMin = -200f,
                         SoftLimitMax = 5f,

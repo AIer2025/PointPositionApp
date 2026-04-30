@@ -74,7 +74,7 @@ namespace PointPositionApp.ViewModels
     {
         private static readonly Logger Logger = LogManager.GetCurrentClassLogger();
 
-        private readonly ModbusService _modbus;
+        private ModbusService _modbus;
         private readonly DatabaseService _db;
         private readonly AppSettings _settings;
         private readonly DispatcherTimer _pollTimer;
@@ -294,6 +294,25 @@ namespace PointPositionApp.ViewModels
             Logger.Info("目标地址: {0}:{1}, 模拟模式: {2}, SlaveId: {3}",
                 _settings.PlcIpAddress, _settings.PlcPort, _settings.SimulationMode, _settings.SlaveId);
             StatusMessage = "正在连接PLC...";
+
+            // 根据当前设置重建 Modbus 服务实例（解决设置窗口修改模拟模式后不生效的问题）
+            bool needSimulation = _settings.SimulationMode;
+            bool currentIsSimulation = _modbus is SimulationModbusService;
+            if (needSimulation != currentIsSimulation)
+            {
+                Logger.Info("Modbus 服务类型切换: {0} -> {1}",
+                    currentIsSimulation ? "模拟" : "真实", needSimulation ? "模拟" : "真实");
+                _modbus.Disconnect();
+                _modbus.Dispose();
+                _modbus = needSimulation
+                    ? new SimulationModbusService(_settings)
+                    : new ModbusService(_settings);
+                _modbus.ConnectionStateChanged += connected =>
+                {
+                    Application.Current?.Dispatcher.Invoke(() => IsPlcConnected = connected);
+                };
+            }
+
             _modbus.IpAddress = _settings.PlcIpAddress;
             _modbus.Port = _settings.PlcPort;
             var ok = await _modbus.ConnectAsync();
@@ -437,7 +456,7 @@ namespace PointPositionApp.ViewModels
                 StatusMessage = "急停状态，请先复位后再操作";
                 return false;
             }
-            if (axis != null && _settings.RequireEnableBeforeMotion)
+            if (axis != null && _settings.RequireEnableBeforeMotion && axis.RequireEnable)
             {
                 if (!_modbus.ReadAxisEnable(axis))
                 {

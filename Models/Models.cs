@@ -148,6 +148,9 @@ namespace PointPositionApp.Models
         /// <summary>回零优先级，数值小的先回（Z/Z1轴优先）</summary>
         public int HomePriority { get; set; }
 
+        // 是否需要使能检查（步进电机无使能功能，设为false跳过检查）
+        public bool RequireEnable { get; set; } = true;
+
         // 安全限位（软限位）
         public float SoftLimitMin { get; set; } = -9999f;  // 最小位置限位 (mm)
         public float SoftLimitMax { get; set; } = 9999f;   // 最大位置限位 (mm)
